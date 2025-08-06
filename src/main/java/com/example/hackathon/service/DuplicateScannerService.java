@@ -6,6 +6,7 @@ import java.util.*;
 // import java.util.stream.Collectors;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
+import java.util.stream.Collectors;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
@@ -13,6 +14,9 @@ import org.apache.tika.Tika;
 import org.springframework.stereotype.Service;
 
 import com.example.hackathon.config.RuleLoader;
+import com.example.hackathon.dto.DeleteDuplicatesRequestDto;
+import com.example.hackathon.dto.DuplicateFileDto;
+import com.example.hackathon.dto.DuplicateGroupDto;
 import com.example.hackathon.helper.GetfileExtension;
 import com.example.hackathon.rules.CategorizationRule;
 import com.example.hackathon.rules.CategorizationRuleLoader;
@@ -211,4 +215,74 @@ private void categorizeApplications(String basePath) {
 
         return CATEGORY_RULES.getOrDefault(extension, "Others");
     }
+
+    public List<DuplicateGroupDto> findDuplicates(String path, boolean recursive) {
+    hashMap.clear(); // Reset before new scan
+    List<DuplicateGroupDto> duplicateGroups = new ArrayList<>();
+
+    Collection<File> files = FileUtils.listFiles(new File(path), null, recursive);
+    for (File file : files) {
+        try {
+            String fileHash = DigestUtils.sha256Hex(FileUtils.readFileToByteArray(file));
+            hashMap.computeIfAbsent(fileHash, k -> new ArrayList<>()).add(file);
+        } catch (IOException e) {
+            System.out.println("❌ Failed to read file: " + file.getAbsolutePath());
+        }
+    }
+
+    // Convert to DTOs for response
+    for (Map.Entry<String, List<File>> entry : hashMap.entrySet()) {
+        if (entry.getValue().size() > 1) {
+            DuplicateGroupDto group = new DuplicateGroupDto();
+            group.setHash(entry.getKey());
+            
+            List<DuplicateFileDto> fileDtos = new ArrayList<>();
+            for (File file : entry.getValue()) {
+                DuplicateFileDto fileDto = new DuplicateFileDto();
+                fileDto.setPath(file.getAbsolutePath());
+                fileDto.setSize(file.length());
+                fileDto.setLastModified(new Date(file.lastModified()).toString());
+                fileDto.setSelected(false); // Default not selected
+                fileDtos.add(fileDto);
+            }
+            group.setFiles(fileDtos);
+            duplicateGroups.add(group);
+        }
+    }
+
+    return duplicateGroups;
+}
+
+public Map<String, List<String>> processDuplicateDeletion(DeleteDuplicatesRequestDto request) {
+    Map<String, List<String>> results = new HashMap<>();
+    results.put("deleted", new ArrayList<>());
+    results.put("errors", new ArrayList<>());
+
+    for (DuplicateGroupDto group : request.getDuplicateGroups()) {
+        // Find which files are marked to keep (selected)
+        List<DuplicateFileDto> filesToKeep = group.getFiles().stream()
+                .filter(DuplicateFileDto::isSelected)
+                .collect(Collectors.toList());
+
+        // If none selected, keep the first one by default
+        if (filesToKeep.isEmpty()) {
+            filesToKeep = Collections.singletonList(group.getFiles().get(0));
+        }
+
+        // Delete all files not marked to keep
+        for (DuplicateFileDto fileDto : group.getFiles()) {
+            if (!filesToKeep.contains(fileDto)) {
+                File file = new File(fileDto.getPath());
+                if (file.delete()) {
+                    results.get("deleted").add(file.getAbsolutePath());
+                    Logwritter.write("🗑️ Deleted: " + file.getAbsolutePath());
+                } else {
+                    results.get("errors").add(file.getAbsolutePath());
+                }
+            }
+        }
+    }
+
+    return results;
+}
 }

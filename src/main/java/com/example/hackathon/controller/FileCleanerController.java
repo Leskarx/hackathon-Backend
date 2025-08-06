@@ -1,4 +1,3 @@
-// src/main/java/com/example/hackathon/controller/FileCleanerController.java
 package com.example.hackathon.controller;
 
 import com.example.hackathon.dto.*;
@@ -7,6 +6,8 @@ import com.example.hackathon.service.EmailService;
 import com.example.hackathon.service.Logwritter;
 
 import java.io.File;
+import java.util.List;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -14,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/cleaner")
-@CrossOrigin(origins = "*") // Allow all origins for development
+@CrossOrigin(origins = "*")
 public class FileCleanerController {
 
     @Autowired
@@ -28,10 +29,8 @@ public class FileCleanerController {
         ScanResponseDto response = new ScanResponseDto();
         
         try {
-            // Initialize logs
             Logwritter.initLogFile();
             
-            // Validate directory
             File dir = new File(request.getDirectoryPath());
             if (!dir.exists() || !dir.isDirectory()) {
                 response.setMessage("Invalid directory path");
@@ -39,25 +38,40 @@ public class FileCleanerController {
                 return ResponseEntity.badRequest().body(response);
             }
 
-            // Perform requested operation
             switch (request.getOperation()) {
                 case DELETE_DUPLICATES:
-                    scannerService.deleteDuplicatesOnly(request.getDirectoryPath(), request.isRecursive());
+                    List<DuplicateGroupDto> deleteDuplicates = scannerService.findDuplicates(
+                        request.getDirectoryPath(), 
+                        request.isRecursive()
+                    );
+                    response.setMessage("Duplicates found: " + deleteDuplicates.size() + " groups");
+                    response.setSuccess(true);
+                    response.setDuplicateGroups(deleteDuplicates);
                     break;
+                    
                 case CATEGORIZE_FILES:
                     scannerService.categorizeOnly(request.getDirectoryPath(), request.isRecursive());
+                    response.setMessage("Files categorized successfully");
+                    response.setSuccess(true);
                     break;
+                    
                 case BOTH:
-                    scannerService.scanDirectory(request.getDirectoryPath(), request.isRecursive());
+                    List<DuplicateGroupDto> bothDuplicates = scannerService.findDuplicates(
+                        request.getDirectoryPath(), 
+                        request.isRecursive()
+                    );
+                    scannerService.categorizeOnly(request.getDirectoryPath(), request.isRecursive());
+                    response.setMessage("Operation completed. Duplicates found: " + bothDuplicates.size() + " groups");
+                    response.setSuccess(true);
+                    response.setDuplicateGroups(bothDuplicates);
                     break;
+                    
                 case NONE:
                     response.setMessage("No operation performed");
                     response.setSuccess(true);
-                    return ResponseEntity.ok(response);
+                    break;
             }
 
-            response.setMessage("Operation completed successfully");
-            response.setSuccess(true);
             response.setLogFilePath(Logwritter.getLogFilePath());
             return ResponseEntity.ok(response);
 
@@ -65,6 +79,36 @@ public class FileCleanerController {
             response.setMessage("Error during operation: " + e.getMessage());
             response.setSuccess(false);
             return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    @GetMapping("/duplicates")
+    public ResponseEntity<List<DuplicateGroupDto>> findDuplicates(
+            @RequestParam String directoryPath,
+            @RequestParam(required = false, defaultValue = "false") boolean recursive) {
+        
+        try {
+            File dir = new File(directoryPath);
+            if (!dir.exists() || !dir.isDirectory()) {
+                return ResponseEntity.badRequest().body(null);
+            }
+
+            List<DuplicateGroupDto> duplicates = scannerService.findDuplicates(directoryPath, recursive);
+            return ResponseEntity.ok(duplicates);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(null);
+        }
+    }
+
+    @PostMapping("/delete-duplicates")
+    public ResponseEntity<Map<String, List<String>>> deleteSelectedDuplicates(
+            @RequestBody DeleteDuplicatesRequestDto request) {
+        
+        try {
+            Map<String, List<String>> results = scannerService.processDuplicateDeletion(request);
+            return ResponseEntity.ok(results);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(null);
         }
     }
 

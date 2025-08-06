@@ -2,6 +2,9 @@ package com.example.hackathon.service;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.*;
 // import java.util.stream.Collectors;
 import java.util.jar.JarFile;
@@ -14,9 +17,12 @@ import org.apache.tika.Tika;
 import org.springframework.stereotype.Service;
 
 import com.example.hackathon.config.RuleLoader;
+import com.example.hackathon.dto.CategoryDto;
+import com.example.hackathon.dto.ConfigDto;
 import com.example.hackathon.dto.DeleteDuplicatesRequestDto;
 import com.example.hackathon.dto.DuplicateFileDto;
 import com.example.hackathon.dto.DuplicateGroupDto;
+import com.example.hackathon.dto.FileDto;
 import com.example.hackathon.helper.GetfileExtension;
 import com.example.hackathon.rules.CategorizationRule;
 import com.example.hackathon.rules.CategorizationRuleLoader;
@@ -127,6 +133,10 @@ private Map<String, List<String>> deleteDuplicates() {
     }
     
     return results;
+}
+public String categorizeFile(File file) {
+    LoggerService logger = new LoggerService(); // Create logger if needed
+    return categorizeFile(file, logger);
 }
 
     public String categorizeFile(File file, LoggerService logger) {
@@ -285,4 +295,85 @@ public Map<String, List<String>> processDuplicateDeletion(DeleteDuplicatesReques
 
     return results;
 }
+// Add these methods to your DuplicateScannerService
+
+private List<CategorizationRule> rules = new ArrayList<>();
+private List<String> scanPaths = new ArrayList<>();
+
+public void addOrUpdateRule(CategorizationRule rule) {
+    rules.removeIf(r -> r.getMatch().equalsIgnoreCase(rule.getMatch()));
+    rules.add(rule);
+    saveRulesToFile();
+}
+
+public void deleteRule(String match) {
+    rules.removeIf(r -> r.getMatch().equalsIgnoreCase(match));
+    saveRulesToFile();
+}
+
+public List<CategorizationRule> getAllRules() {
+    return Collections.unmodifiableList(rules);
+}
+
+public List<CategoryDto> getCategorizedFiles(String directoryPath, boolean recursive) {
+    Map<String, List<FileDto>> categorizedFiles = new HashMap<>();
+    
+    Collection<File> files = FileUtils.listFiles(new File(directoryPath), null, recursive);
+    for (File file : files) {
+        String category = categorizeFile(file);
+        categorizedFiles.computeIfAbsent(category, k -> new ArrayList<>())
+                       .add(convertToFileDto(file));
+    }
+    
+    return categorizedFiles.entrySet().stream()
+            .map(entry -> {
+                CategoryDto dto = new CategoryDto();
+                dto.setName(entry.getKey());
+                dto.setFiles(entry.getValue());
+                return dto;
+            })
+            .collect(Collectors.toList());
+}
+
+private FileDto convertToFileDto(File file) {
+    FileDto dto = new FileDto();
+    dto.setPath(file.getAbsolutePath());
+    dto.setSize(file.length());
+    dto.setLastModified(new Date(file.lastModified()).toString());
+    return dto;
+}
+
+public List<String> getScanPaths() {
+    return scanPaths;
+}
+
+public void updateConfig(ConfigDto config) {
+    this.scanPaths = config.getScanPaths();
+    this.rules = config.getRules();
+    saveRulesToFile();
+    saveScanPaths();
+}
+
+private void saveRulesToFile() {
+    try {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.writeValue(new File("rules.json"), rules);
+    } catch (IOException e) {
+        System.out.println("Failed to save rules: " + e.getMessage());
+    }
+}
+
+private void saveScanPaths() {
+    try {
+        Files.write(Paths.get("scan_paths.txt"), 
+                  scanPaths, 
+                  StandardCharsets.UTF_8);
+    } catch (IOException e) {
+        System.out.println("Failed to save scan paths: " + e.getMessage());
+        
+    }
+}
+
+
+
 }

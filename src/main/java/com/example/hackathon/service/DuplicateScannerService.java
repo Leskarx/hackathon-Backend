@@ -262,37 +262,33 @@ private void categorizeApplications(String basePath) {
 
     return duplicateGroups;
 }
-
 public Map<String, List<String>> processDuplicateDeletion(DeleteDuplicatesRequestDto request) {
     Map<String, List<String>> results = new HashMap<>();
     results.put("deleted", new ArrayList<>());
     results.put("errors", new ArrayList<>());
 
     for (DuplicateGroupDto group : request.getDuplicateGroups()) {
-        // Find which files are marked to keep (selected)
-        List<DuplicateFileDto> filesToKeep = group.getFiles().stream()
-                .filter(DuplicateFileDto::isSelected)
+        // Find which files are marked for deletion (selected: true)
+        List<DuplicateFileDto> filesToDelete = group.getFiles().stream()
+                .filter(DuplicateFileDto::isSelected) // Now checking for selected: true
                 .collect(Collectors.toList());
 
-        // If none selected, keep the first one by default
-        if (filesToKeep.isEmpty()) {
-            filesToKeep = Collections.singletonList(group.getFiles().get(0));
+        // If all are marked for deletion, keep at least one (first file)
+        if (filesToDelete.size() == group.getFiles().size()) {
+            filesToDelete.remove(0); // Keep the first file
         }
 
-        // Delete all files not marked to keep
-        for (DuplicateFileDto fileDto : group.getFiles()) {
-            if (!filesToKeep.contains(fileDto)) {
-                File file = new File(fileDto.getPath());
-                if (file.delete()) {
-                    results.get("deleted").add(file.getAbsolutePath());
-                    Logwritter.write("🗑️ Deleted: " + file.getAbsolutePath());
-                } else {
-                    results.get("errors").add(file.getAbsolutePath());
-                }
+        // Delete all files marked selected: true
+        for (DuplicateFileDto fileDto : filesToDelete) {
+            File file = new File(fileDto.getPath());
+            if (file.delete()) {
+                results.get("deleted").add(file.getAbsolutePath());
+                Logwritter.write("🗑️ Deleted: " + file.getAbsolutePath());
+            } else {
+                results.get("errors").add(file.getAbsolutePath());
             }
         }
     }
-
     return results;
 }
 // Add these methods to your DuplicateScannerService
